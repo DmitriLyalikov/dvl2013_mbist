@@ -21,12 +21,14 @@ module bist #(
     logic [length-1:0]    bist_data;
     logic [length-1:0]    ramout;
     logic [length-1:0]    ref_data;
+    logic [length-1:0]    pattern_latched;
     logic [6:0]           q;
     logic                 cout, NbarT, ld;
     logic                 we_select;
     logic                 eq, gt, lt;
+    logic [2:0]           selector;
 
-    // Counter
+    // Counter (7 bits: 6 for address, 1 for rw)
     counter #(.length(7)) u_counter (
         .clk(clk),
         .ld(ld),
@@ -47,15 +49,26 @@ module bist #(
         .ld(ld)
     );
 
+    // Limit selector to valid patterns only (0–5)
+    assign selector = (q[6:4] <= 3'b101) ? q[6:4] : 3'b000;
+
     // Decoder
     decoder u_decoder (
-        .q(q[6:4]),         // MSBs select pattern
-        .data_t(ref_data)   // reference test data
+        .q(selector),
+        .data_t(ref_data)
     );
+
+    // Latch decoder pattern at start of each write phase
+    always_ff @(posedge clk or posedge rst) begin
+        if (rst)
+            pattern_latched <= 0;
+        else if (NbarT && q[6] == 1'b0 && q[5:0] == 6'd0)
+            pattern_latched <= ref_data;
+    end
 
     // Comparator
     comparator u_comparator (
-        .data_t(ref_data),
+        .data_t(pattern_latched),
         .ramout(ramout),
         .gt(gt),
         .eq(eq),
@@ -73,15 +86,15 @@ module bist #(
     // Data MUX
     multiplexer #(.WIDTH(length)) u_data_mux (
         .normal_in(datain),
-        .bist_in(ref_data),
+        .bist_in(pattern_latched),
         .NbarT(NbarT),
         .out(bist_data)
     );
 
-    // Write Enable Select
+    // Write Enable Selection
     assign we_select = (NbarT) ? ~q[6] : ~rwbarin;
 
-    // Memory
+    // Memory Instance
     single_port_ram u_ram (
         .clk(clk),
         .we(we_select),
@@ -90,17 +103,23 @@ module bist #(
         .ramout(ramout)
     );
 
-    // Output assignment
+    // Output for observing
     assign dataout = ramout;
 
-    // Fail logic
+    // Fail Logic: Only trigger fail during BIST reads with valid pattern
     always_ff @(posedge clk or posedge rst) begin
-        if (rst)
-            fail <= 0;
-        else if (NbarT && opr && q[6] && !eq)
-            fail <= 1;  // BIST mode fail
-        else if (NbarT && !opr && rwbarin && !eq)
-            fail <= 1;  // Normal mode fail
+    if (rst) begin
+        fail <= 0;
+    end 
+    // Reset fail at the start of a new pattern write (address 0, write phase)
+    else if (NbarT && q[6] == 0 && q[5:0] == 6'd0) begin
+        fail <= 0;
+    end 
+    // Set fail only during BIST read phase
+    else if (NbarT && opr && q[6] && (^pattern_latched !== 1'bx) && !eq) begin
+        fail <= 1;
+    end
     end
 
 endmodule
+

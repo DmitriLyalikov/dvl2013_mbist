@@ -2,35 +2,36 @@
 
 module counter #(
     parameter length = 10
-)(
-    input  logic [length-1:0] d_in,    // Load value
-    input  logic              clk,     // Clock
-    input  logic              ld,      // Load enable
-    input  logic              u_d,     // Up/down control (1 = up, 0 = down)
-    input  logic              cen,     // Count enable
-    output logic [length-1:0] q,       // Counter output
-    output logic              cout     // Carry out
+) (
+    input  logic                  clk,
+    input  logic                  ld,      // load enable
+    input  logic                  u_d,     // up/down: 1 = up, 0 = down
+    input  logic                  cen,     // count enable
+    input  logic [length-1:0]     d_in,    // input load value
+    output logic [length-1:0]     q,       // counter output
+    output logic                  cout     // carry-out (overflow/underflow)
 );
+
+    logic [length-1:0] next_q;
 
     always_ff @(posedge clk) begin
         if (cen) begin
             if (ld) begin
                 q <= d_in;
+                cout <= 0;
             end else begin
                 if (u_d) begin
-                    q <= q + 1;
+                    next_q = q + 1;
+                    cout <= (q == {length{1'b1}});
+                    q <= next_q;
                 end else begin
-                    q <= q - 1;
+                    next_q = q - 1;
+                    cout <= (q == {length{1'b0}});
+                    q <= next_q;
                 end
             end
         end
     end
 
-    always_comb begin
-        if (u_d)
-            cout = (q == {length{1'b1}});  // Max value
-        else
-            cout = (q == {length{1'b0}});  // Min value
-    end
-
 endmodule
+
